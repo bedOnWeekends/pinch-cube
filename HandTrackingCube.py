@@ -4,6 +4,8 @@ import math
 import time
 import logging
 import pygame
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -12,7 +14,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("hand_tracking.log"),
+        logging.FileHandler(filename="hand_tracking.log", encoding='utf-8', mode='w'),
         logging.StreamHandler()
     ]
 )
@@ -329,87 +331,107 @@ class HandTrackingCube:
             self.error_count += 1
             return frame
 
+    def _get_ui_font(self, size):
+        font_candidates = [
+            "fonts/NanumGothic.ttf",
+            r"C:\Windows\Fonts\malgun.ttf",
+            r"C:\Windows\Fonts\gulim.ttc",
+        ]
+        for font_path in font_candidates:
+            try:
+                return ImageFont.truetype(font_path, size=size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
     def display_gesture_info(self, image):
         cv2.rectangle(image, (10, 10), (300, 150), (0, 0, 0), -1)
         cv2.rectangle(image, (10, 10), (300, 150), (255, 255, 255), 2)
 
-        cv2.putText(image, "Hand Gesture Detection", (15, 30),
-                    cv2.FONT_ITALIC, 0.7, (255, 255, 255), 2)
-
-        y_pos = 60
-        cv2.putText(image, "Left Hand:", (15, y_pos),
-                    cv2.FONT_ITALIC, 0.6, (255, 255, 255), 2)
-        y_pos += 20
-
-        if self.left_hand:
-            left_status = "Detected"
-            left_pinch = "Pinching" if self.left_pinch else "Not pinching"
-            cv2.putText(image, left_pinch, (25, y_pos),
-                        cv2.FONT_ITALIC, 0.5, (255, 255, 255), 1)
-        else:
-            cv2.putText(image, "Not detected", (25, y_pos),
-                        cv2.FONT_ITALIC, 0.5, (255, 255, 255), 1)
-
-        y_pos += 30
-        cv2.putText(image, "Right Hand:", (15, y_pos),
-                    cv2.FONT_ITALIC, 0.6, (255, 255, 255), 2)
-        y_pos += 20
-
-        if self.right_hand:
-            right_status = "Detected"
-            right_pinch = "Pinching" if self.right_pinch else "Not pinching"
-            cv2.putText(image, right_pinch, (25, y_pos),
-                        cv2.FONT_ITALIC, 0.5, (255, 255, 255), 1)
-        else:
-            cv2.putText(image, "Not detected", (25, y_pos),
-                        cv2.FONT_ITALIC, 0.5, (255, 255, 255), 1)
-
         width = image.shape[1]
         distance_panel_width = 350
-
         cv2.rectangle(image, (width - distance_panel_width - 10, 10), (width - 10, 150), (0, 0, 0), -1)
         cv2.rectangle(image, (width - distance_panel_width - 10, 10), (width - 10, 150), (255, 255, 255), 2)
 
-        cv2.putText(image, "Pinch Distance Measurement", (width - distance_panel_width - 5, 30),
-                    cv2.FONT_ITALIC, 0.7, (255, 255, 255), 2)
+        image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(image_pil)
+        font_title = self._get_ui_font(20)
+        font_body = self._get_ui_font(16)
+        font_small = self._get_ui_font(14)
+        white = (255, 255, 255)
+
+        draw.text((15, 18), "제스처 인식", fill=white, font=font_title)
+
+        y_pos = 60
+        draw.text((15, y_pos), "왼손:", fill=white, font=font_body)
+        y_pos += 20
+        if self.left_hand:
+            draw.text((25, y_pos), "집는 중" if self.left_pinch else "집지 않음", fill=white, font=font_small)
+        else:
+            draw.text((25, y_pos), "감지 안 됨", fill=white, font=font_small)
+
+        y_pos += 30
+        draw.text((15, y_pos), "오른손:", fill=white, font=font_body)
+        y_pos += 20
+        if self.right_hand:
+            draw.text((25, y_pos), "집는 중" if self.right_pinch else "집지 않음", fill=white, font=font_small)
+        else:
+            draw.text((25, y_pos), "감지 안 됨", fill=white, font=font_small)
+
+        draw.text((width - distance_panel_width - 5, 18), "핀치 거리 측정", fill=white, font=font_title)
 
         info_y = 60
-
+        bar_start_x = None
+        bar_end_x = None
+        bar_y = None
+        filled_width = 0
         if self.left_pinch and self.right_pinch:
-            cv2.putText(image, f"Both Pinch Distance: {self.both_hands_pinch_distance:.3f}",
-                        (width - distance_panel_width, info_y),
-                        cv2.FONT_ITALIC, 0.6, (255, 255, 255), 2)
+            draw.text(
+                (width - distance_panel_width, info_y),
+                f"양손 핀치 거리: {self.both_hands_pinch_distance:.3f}",
+                fill=white,
+                font=font_body,
+            )
             info_y += 30
 
             bar_start_x = width - distance_panel_width + 10
             bar_end_x = width - 20
+            bar_y = info_y
             bar_width = bar_end_x - bar_start_x
-
             scaled_distance = min(self.both_hands_pinch_distance, 1.0)
             filled_width = int(bar_width * scaled_distance)
-
-            cv2.rectangle(image, (bar_start_x, info_y), (bar_end_x, info_y + 15), (100, 100, 100), -1)
-            if filled_width > 0:
-                cv2.rectangle(image, (bar_start_x, info_y), (bar_start_x + filled_width, info_y + 15), (255, 255, 255), -1)
-
             info_y += 30
 
-            cv2.putText(image, f"Explosion factor: {self.cube.explosion_factor:.2f}",
-                        (width - distance_panel_width, info_y),
-                        cv2.FONT_ITALIC, 0.5, (255, 255, 255), 1)
+            draw.text(
+                (width - distance_panel_width, info_y),
+                f"분해 계수: {self.cube.explosion_factor:.2f}",
+                fill=white,
+                font=font_small,
+            )
             info_y += 20
 
         if self.left_pinch:
-            cv2.putText(image, f"Left Pinch Distance: {self.left_pinch_distance:.3f}",
-                        (width - distance_panel_width, info_y),
-                        cv2.FONT_ITALIC, 0.5, (255, 255, 255), 1)
+            draw.text(
+                (width - distance_panel_width, info_y),
+                f"왼손 핀치 거리: {self.left_pinch_distance:.3f}",
+                fill=white,
+                font=font_small,
+            )
             info_y += 20
 
         if self.right_pinch:
-            cv2.putText(image, f"Right Pinch Distance: {self.right_pinch_distance:.3f}",
-                        (width - distance_panel_width, info_y),
-                        cv2.FONT_ITALIC, 0.5, (255, 255, 255), 1)
-        info_y += 20
+            draw.text(
+                (width - distance_panel_width, info_y),
+                f"오른손 핀치 거리: {self.right_pinch_distance:.3f}",
+                fill=white,
+                font=font_small,
+            )
+
+        image[:] = cv2.cvtColor(np.array(image_pil), cv2.COLOR_RGB2BGR)
+        if bar_start_x is not None and bar_end_x is not None and bar_y is not None:
+            cv2.rectangle(image, (bar_start_x, bar_y), (bar_end_x, bar_y + 15), (100, 100, 100), -1)
+            if filled_width > 0:
+                cv2.rectangle(image, (bar_start_x, bar_y), (bar_start_x + filled_width, bar_y + 15), (255, 255, 255), -1)
 
     def run(self):
         logger.info("Starting HandTrackingCube")
